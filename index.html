@@ -1,0 +1,89 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="manifest" href="manifest.json"><meta name="theme-color" content="#111827"/>
+<title>Interactive Budgeting App</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>.btn{padding:.375rem .75rem;border-radius:.75rem;background:#111827;color:#fff}.btn:hover{opacity:.9}.input{width:100%;padding:.5rem .75rem;border:1px solid #e5e7eb;border-radius:.75rem;background:#fff}.label{display:block;font-size:.875rem;color:#4b5563;margin-bottom:.25rem}</style></head>
+<body class="min-h-screen bg-gray-50">
+<div class="max-w-3xl mx-auto p-4"><h1 class="text-2xl font-bold mb-2">Interactive Budgeting App</h1>
+<p class="text-sm text-gray-600 mb-4">Add recurring items, set a known balance on a date, and see your forecast. Your data stays on your device.</p></div>
+<div id="root"></div>
+<script>if('serviceWorker'in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}</script>
+<script type="text/babel">
+const {useEffect,useMemo,useState}=React;
+const pad=n=>(n<10?`0${n}`:`${n}`);const toKey=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+const parseKey=k=>{const [y,m,d]=k.split("-").map(x=>parseInt(x,10));return new Date(y,m-1,d)};
+const startOfDay=d=>new Date(d.getFullYear(),d.getMonth(),d.getDate());
+const addDays=(d,n)=>{const nd=new Date(d);nd.setDate(nd.getDate()+n);return nd};
+const clamp=(v,lo,hi)=>Math.min(Math.max(v,lo),hi);
+function dayDiff(a,b){return Math.round((startOfDay(b)-startOfDay(a))/(1000*60*60*24))}
+function getMonthGrid(year,month){const first=new Date(year,month,1);const offset=(first.getDay()+6)%7;const start=addDays(first,-offset);return Array.from({length:42},(_,i)=>addDays(start,i))}
+const LS_KEY="budgeting-app-state-v1";
+function loadState(){try{const raw=localStorage.getItem(LS_KEY);if(!raw)return null;const s=JSON.parse(raw);s.transactions=s.transactions||[];s.anchors=s.anchors||[];return s}catch{return null}}
+function saveState(s){localStorage.setItem(LS_KEY,JSON.stringify(s))}
+function occursOnDate(tx,date){const d0=parseKey(tx.start);const d=startOfDay(date);if(tx.end&&d>parseKey(tx.end))return false;if(d<d0)return false;switch(tx.freq){case"once":return toKey(d)===toKey(d0);case"daily":return true;case"weekly":{const dow=(d.getDay()+6)%7;return tx.weeklyDays?.includes(dow)??false}case"biweekly":{const diff=dayDiff(d0,d);const sameDow=((d.getDay()+6)%7)===((d0.getDay()+6)%7);return sameDow&&diff%14===0}case"monthly":{const target=tx.monthlyDay||d0.getDate();if(d.getDate()!==target)return false;return d>=d0}default:return false}}
+function sumForDate(transactions,date){return transactions.reduce((acc,tx)=>(occursOnDate(tx,date)?acc+Number(tx.amount):acc),0)}
+function getNearestAnchor(anchors,target){if(!anchors.length)return null;const t=startOfDay(target);let best=anchors[0];let bestDist=Math.abs(dayDiff(parseKey(best.date),t));for(const a of anchors){const dist=Math.abs(dayDiff(parseKey(a.date),t));if(dist<bestDist){best=a;bestDist=dist}}return best}
+function projectBalance(transactions,anchors,targetDate){const anchor=getNearestAnchor(anchors,targetDate);if(!anchor)return null;const aDate=parseKey(anchor.date);const tDate=startOfDay(targetDate);const step=dayDiff(aDate,tDate);if(step===0)return Number(anchor.balance);let bal=Number(anchor.balance);if(step>0){for(let i=1;i<=step;i++){bal+=sumForDate(transactions,addDays(aDate,i))}}else{for(let i=-1;i>=step;i--){bal-=sumForDate(transactions,addDays(aDate,i))}}return bal}
+function currency(n){if(n===null||n===undefined||Number.isNaN(n))return "—";return n.toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2})}
+function Card({children}){return(<div className="bg-gray-100/60 border border-gray-200 rounded-2xl p-3 shadow-sm">{children}</div>)}
+function describeRule(t){const start=t.start;switch(t.freq){case"once":return`One-time on ${start}`;case"daily":return`Daily starting ${start}${t.end?` until ${t.end}`:""}`;case"weekly":{const names=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];const picked=(t.weeklyDays||[]).map(i=>names[i]).join(", ");return`Weekly on ${picked} starting ${start}${t.end?` until ${t.end}`:""}`}case"biweekly":return`Every 2 weeks on the same weekday as ${start}${t.end?` until ${t.end}`:""}`;case"monthly":return`Monthly on day ${t.monthlyDay||parseKey(t.start).getDate()} starting ${start}${t.end?` until ${t.end}`:""}`;default:return""}}
+function WeekdayPicker({value,onChange}){const names=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];function toggle(i){const set=new Set(value);if(set.has(i))set.delete(i);else set.add(i);onChange([...set].sort((a,b)=>a-b))}return(<div className="flex flex-wrap gap-1">{names.map((n,i)=>(<button type="button" key={n} onClick={()=>toggle(i)} className={`px-2 py-1 border rounded-full text-sm ${value.includes(i)?"bg-gray-900 text-white":"bg-white"}`}>{n}</button>))}</div>)}
+function computeYAxis(vals){if(!vals||vals.length===0){return{yMin:0,yMax:100}}const minVal=Math.min(...vals);const maxVal=Math.max(...vals);const yMin=Math.floor(minVal/100)*100;let yMax=Math.ceil(maxVal/100)*100;if(yMax===yMin)yMax=yMin+100;return{yMin,yMax}}
+function MiniLineChart({data,height=160}){const width=800,margin={top:10,right:10,bottom:20,left:40},w=width-margin.left-margin.right,h=height-margin.top-margin.bottom;
+const vals=(data||[]).map(d=>d&&d.bal!=null?Number(d.bal):null).filter(v=>v!=null&&!Number.isNaN(v));
+const {yMin,yMax}=computeYAxis(vals);
+function x(i){return (i/Math.max(1,(data?.length||0)-1))*w}
+function y(v){if(v==null)return h;const range=yMax-yMin;return h-((v-yMin)/(range||1))*h}
+const path=(data||[]).map((d,i)=>`${i===0?"M":"L"}${x(i)},${y(d?.bal)}`).join(" ");
+return(<div className="bg-white border rounded-xl p-2 overflow-x-auto"><svg viewBox={`0 0 ${width} ${height}`} className="w-full h-40"><g transform={`translate(${margin.left},${margin.top})`}>
+{Array.from({length:5},(_,i)=>{const yy=(i/4)*h;const val=yMax-(i/4)*(yMax-yMin);return(<g key={i}><line x1={0} x2={w} y1={yy} y2={yy} stroke="#e5e7eb"/><text x={-8} y={yy} textAnchor="end" dominantBaseline="middle" className="text-[10px] fill-gray-500">{val.toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:0})}</text></g>)})}
+{(data||[]).map((d,i)=>(i%15===0?(<text key={i} x={x(i)} y={h+14} textAnchor="middle" className="text-[10px] fill-gray-500">{(d?.date||"").slice(5)}</text>):null))}
+<path d={path} fill="none" stroke="#111827" strokeWidth={2}/></g></svg></div>)}
+function TransactionForm({onAdd}){const todayKey=toKey(startOfDay(new Date()));const [form,setForm]=useState({label:"",amount:"",start:todayKey,end:"",freq:"monthly",weeklyDays:[0],monthlyDay:""});
+function submit(e){e.preventDefault();if(!form.label||form.amount==="")return;const monthlyDay=form.monthlyDay?clamp(Number(form.monthlyDay),1,31):undefined;onAdd({label:form.label,amount:Number(form.amount),start:form.start,end:form.end||undefined,freq:form.freq,weeklyDays:form.freq==="weekly"?form.weeklyDays:undefined,monthlyDay});setForm({label:"",amount:"",start:todayKey,end:"",freq:"monthly",weeklyDays:[0],monthlyDay:""})}
+const freq=form.freq;
+return(<form onSubmit={submit} className="space-y-3"><div className="grid grid-cols-2 gap-2"><div className="col-span-2"><label className="label">Label</label><input className="input" value={form.label} onChange={e=>setForm({...form,label:e.target.value})} placeholder="e.g. Rent, Paycheck, Groceries"/></div>
+<div><label className="label">Amount</label><input type="number" className="input" value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} placeholder="+ income, - expense"/></div>
+<div><label className="label">Starts</label><input type="date" className="input" value={form.start} onChange={e=>setForm({...form,start:e.target.value})}/></div>
+<div><label className="label">Ends (optional)</label><input type="date" className="input" value={form.end} onChange={e=>setForm({...form,end:e.target.value})}/></div>
+<div><label className="label">Frequency</label><select className="input" value={form.freq} onChange={e=>setForm({...form,freq:e.target.value})}><option value="once">One-time</option><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="biweekly">Every 2 weeks</option><option value="monthly">Monthly</option></select></div>
+{freq==="weekly"&&(<div><label className="label">Days of week</label><WeekdayPicker value={form.weeklyDays} onChange={v=>setForm({...form,weeklyDays:v})}/></div>)}
+{freq==="monthly"&&(<div><label className="label">Day of month</label><input type="number" min="1" max="31" className="input" value={form.monthlyDay} onChange={e=>setForm({...form,monthlyDay:e.target.value})} placeholder="1-31 (optional)"/></div>)}
+</div><div className="flex items-center gap-2"><button className="btn" type="submit">Add</button><span className="text-xs text-gray-500">Tip: Enter negative amounts for expenses (e.g., -1200 for rent)</span></div></form>)}
+function BudgetingApp(){const today=startOfDay(new Date());const [state,setState]=useState(()=>loadState()||{transactions:[],anchors:[],lowBalanceThreshold:0});const [viewYear,setViewYear]=useState(today.getFullYear());const [viewMonth,setViewMonth]=useState(today.getMonth());const [selectedDate,setSelectedDate]=useState(today);
+useEffect(()=>saveState(state),[state]);
+const monthGrid=useMemo(()=>getMonthGrid(viewYear,viewMonth),[viewYear,viewMonth]);
+const dailyNet=useMemo(()=>{const map=new Map();for(const d of monthGrid)map.set(toKey(d),sumForDate(state.transactions,d));return map},[monthGrid,state.transactions]);
+const dailyBalance=useMemo(()=>{const map=new Map();for(const d of monthGrid)map.set(toKey(d),projectBalance(state.transactions,state.anchors,d));return map},[monthGrid,state.transactions,state.anchors]);
+const monthName=new Intl.DateTimeFormat(undefined,{month:"long"}).format(new Date(viewYear,viewMonth,1));
+const forecast=useMemo(()=>{const start=startOfDay(new Date(viewYear,viewMonth,1));return Array.from({length:90},(_,i)=>{const d=addDays(start,i);return{date:toKey(d),bal:projectBalance(state.transactions,state.anchors,d)}})},[viewYear,viewMonth,state.transactions,state.anchors]);
+const lowDays=useMemo(()=>forecast.filter(p=>state.lowBalanceThreshold&&p.bal!==null&&p.bal<state.lowBalanceThreshold),[forecast,state.lowBalanceThreshold]);
+function addTransaction(tx){setState(s=>({...s,transactions:[...s.transactions,{...tx,id:crypto.randomUUID()}]}))}
+function deleteTransaction(id){setState(s=>({...s,transactions:s.transactions.filter(t=>t.id!==id)}))}
+function addAnchor(date,balance){const key=toKey(date);setState(s=>{const others=s.anchors.filter(a=>a.date!==key);return{...s,anchors:[...others,{date:key,balance:Number(balance)}]}})}
+function exportJSON(){const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`budget-data-${Date.now()}.json`;a.click();URL.revokeObjectURL(url)}
+function importJSON(file){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(reader.result);setState({transactions:parsed.transactions||[],anchors:parsed.anchors||[],lowBalanceThreshold:parsed.lowBalanceThreshold||0})}catch(e){alert("Invalid JSON file")}};reader.readAsText(file)}
+function gotoPrevMonth(){const d=new Date(viewYear,viewMonth-1,1);setViewYear(d.getFullYear());setViewMonth(d.getMonth())}
+function gotoNextMonth(){const d=new Date(viewYear,viewMonth+1,1);setViewYear(d.getFullYear());setViewMonth(d.getMonth())}
+return(<div className="min-h-screen bg-gray-50 text-gray-900"><div className="max-w-7xl mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+<div className="lg:col-span-1 space-y-4">
+<Card><h2 className="text-xl font-semibold">Add recurring or one-time item</h2><TransactionForm onAdd={addTransaction}/></Card>
+<Card><h2 className="text-xl font-semibold mb-2">Transactions</h2>{state.transactions.length===0?(<p className="text-sm text-gray-600">No items yet. Add income (+) and expenses (−) above.</p>):(<div className="space-y-2 max-h-72 overflow-auto pr-1">{state.transactions.map(t=>(<div key={t.id} className="flex items-center justify-between bg-white border rounded-xl p-2"><div className="flex-1"><div className="font-medium">{t.label} <span className={`text-xs ml-2 ${Number(t.amount)>=0?"text-green-600":"text-red-600"}`}>{currency(Number(t.amount))}</span></div><div className="text-xs text-gray-600">{describeRule(t)}</div></div><button onClick={()=>deleteTransaction(t.id)} className="ml-3 text-red-600 hover:underline">Delete</button></div>))}</div>)}</Card>
+<Card><h2 className="text-xl font-semibold mb-2">Settings</h2><div className="space-y-3"><div className="flex items-center gap-2"><label className="w-48 text-sm">Low balance alert below</label><input type="number" className="input" value={state.lowBalanceThreshold} onChange={e=>setState(s=>({...s,lowBalanceThreshold:Number(e.target.value)}))}/></div><div className="flex items-center gap-2"><button onClick={exportJSON} className="btn">Export JSON</button><label className="btn cursor-pointer">Import JSON<input type="file" className="hidden" accept="application/json" onChange={e=>e.target.files?.[0]&&importJSON(e.target.files[0])}/></label><button className="ml-auto text-sm text-red-600" onClick={()=>{if(confirm("Clear all data?")){window.localStorage.removeItem(LS_KEY);location.reload();}}}>Reset</button></div>{lowDays.length>0&&(<div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl p-2">⚠️ {lowDays.length} day(s) in the next 90 days fall below your threshold.</div>)}</div></Card>
+</div>
+<div className="lg:col-span-2 space-y-4">
+<Card><div className="flex items-center justify-between"><button className="btn" onClick={gotoPrevMonth}>Prev</button><div className="text-lg font-semibold">{monthName} {viewYear}</div><button className="btn" onClick={gotoNextMonth}>Next</button></div>
+<div className="grid grid-cols-7 gap-2 mt-3">{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map(d=>(<div key={d} className="text-center text-xs text-gray-500">{d}</div>))}
+{monthGrid.map((d,i)=>{const inMonth=d.getMonth()===viewMonth;const k=toKey(d);const net=dailyNet.get(k)||0;const bal=dailyBalance.get(k);const isToday=toKey(d)===toKey(today);const below=state.lowBalanceThreshold&&bal!==null&&bal<state.lowBalanceThreshold;return(<button key={i} onClick={()=>setSelectedDate(d)} className={`text-left border rounded-xl p-2 h-28 bg-white hover:shadow-sm transition relative ${inMonth?"":"opacity-50"} ${isToday?"ring-2 ring-indigo-400":""}`}><div className="flex items-center justify-between"><div className="text-sm font-medium">{d.getDate()}</div>{below&&<span className="text-amber-600 text-xs">low</span>}</div><div className={`text-xs ${net===0?"text-gray-400":net>0?"text-green-600":"text-red-600"}`}>{net===0?"—":`${net>0?"+":""}${currency(net)}`}</div><div className="absolute bottom-2 left-2 right-2 text-xs truncate"><span className="text-gray-500">Bal:</span> <span className={`${bal===null?"text-gray-400":bal>=0?"text-gray-900":"text-red-600"}`}>{currency(bal)}</span></div></button>)})}
+</div></Card>
+<Card><div className="flex flex-col md:flex-row md:items-end gap-3"><div><div className="text-sm text-gray-600">Selected date</div><div className="text-xl font-semibold">{toKey(selectedDate)}</div></div><div className="md:ml-auto flex items-center gap-2"><label className="text-sm">Set known balance</label><input type="number" className="input" placeholder="e.g. 1234.56" id="balInput"/><button className="btn" onClick={()=>{const el=document.getElementById("balInput");const val=Number(el.value);if(Number.isNaN(val))return;addAnchor(selectedDate,val);el.value=""}}>Save</button></div></div>
+<div className="mt-2 text-sm text-gray-600">Projected balance on this date: <span className="font-medium text-gray-900">{currency(projectBalance(state.transactions,state.anchors,selectedDate))}</span></div>
+<div className="mt-4 border-t pt-4"><h3 className="font-semibold mb-2">Anchors</h3>{state.anchors.length===0?(<p className="text-sm text-gray-600">Tip: click any calendar day and set a known balance to anchor projections.</p>):(<div className="flex flex-wrap gap-2">{state.anchors.slice().sort((a,b)=>parseKey(a.date)-parseKey(b.date)).map(a=>(<span key={a.date} className="px-2 py-1 bg-white border rounded-full text-sm">{a.date}: {currency(a.balance)}</span>))}</div>)}</div></Card>
+<Card><h2 className="text-lg font-semibold">90-day balance forecast</h2><MiniLineChart data={forecast} height={160}/></Card>
+</div></div><footer className="max-w-7xl mx-auto p-4 text-xs text-gray-500">Pro tip: Use + amounts for income and − amounts for expenses. Set one or more known balances ("anchors") to get accurate projections in both directions.</footer></div>)};
+const root=ReactDOM.createRoot(document.getElementById("root"));root.render(<BudgetingApp/>);
+</script>
+</body></html>
