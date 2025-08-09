@@ -26,7 +26,13 @@ function saveState(s){localStorage.setItem(LS_KEY,JSON.stringify(s))}
 function occursOnDate(tx,date){const d0=parseKey(tx.start);const d=startOfDay(date);if(tx.end&&d>parseKey(tx.end))return false;if(d<d0)return false;switch(tx.freq){case"once":return toKey(d)===toKey(d0);case"daily":return true;case"weekly":{const dow=(d.getDay()+6)%7;return tx.weeklyDays?.includes(dow)??false}case"biweekly":{const diff=dayDiff(d0,d);const sameDow=((d.getDay()+6)%7)===((d0.getDay()+6)%7);return sameDow&&diff%14===0}case"monthly":{const target=tx.monthlyDay||d0.getDate();if(d.getDate()!==target)return false;return d>=d0}default:return false}}
 function sumForDate(transactions,date){return transactions.reduce((acc,tx)=>(occursOnDate(tx,date)?acc+Number(tx.amount):acc),0)}
 function getNearestAnchor(anchors,target){if(!anchors.length)return null;const t=startOfDay(target);let best=anchors[0];let bestDist=Math.abs(dayDiff(parseKey(best.date),t));for(const a of anchors){const dist=Math.abs(dayDiff(parseKey(a.date),t));if(dist<bestDist){best=a;bestDist=dist}}return best}
-function projectBalance(transactions,anchors,targetDate){const anchor=getNearestAnchor(anchors,targetDate);if(!anchor)return null;const aDate=parseKey(anchor.date);const tDate=startOfDay(targetDate);const step=dayDiff(aDate,tDate);if(step===0)return Number(anchor.balance);let bal=Number(anchor.balance);if(step>0){for(let i=1;i<=step;i++){bal+=sumForDate(transactions,addDays(aDate,i))}}else{for(let i=-1;i>=step;i--){bal-=sumForDate(transactions,addDays(aDate,i))}}return bal}
+function projectBalance(transactions,anchors,targetDate){
+const anchor=getNearestAnchor(anchors,targetDate);if(!anchor)return null;
+const aDate=parseKey(anchor.date);const tDate=startOfDay(targetDate);const step=dayDiff(aDate,tDate);
+let bal=Number(anchor.balance);
+if(step>=0){for(let i=0;i<=step;i++){bal+=sumForDate(transactions,addDays(aDate,i))}}
+else{for(let i=-1;i>step;i--){bal-=sumForDate(transactions,addDays(aDate,i))}}
+return bal}
 function currency(n){if(n===null||n===undefined||Number.isNaN(n))return "—";return n.toLocaleString(undefined,{style:"currency",currency:"USD",maximumFractionDigits:2})}
 function Card({children}){return(<div className="bg-gray-100/60 border border-gray-200 rounded-2xl p-3 shadow-sm">{children}</div>)}
 function describeRule(t){const start=t.start;switch(t.freq){case"once":return`One-time on ${start}`;case"daily":return`Daily starting ${start}${t.end?` until ${t.end}`:""}`;case"weekly":{const names=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];const picked=(t.weeklyDays||[]).map(i=>names[i]).join(", ");return`Weekly on ${picked} starting ${start}${t.end?` until ${t.end}`:""}`}case"biweekly":return`Every 2 weeks on the same weekday as ${start}${t.end?` until ${t.end}`:""}`;case"monthly":return`Monthly on day ${t.monthlyDay||parseKey(t.start).getDate()} starting ${start}${t.end?` until ${t.end}`:""}`;default:return""}}
