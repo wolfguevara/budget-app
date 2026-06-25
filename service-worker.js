@@ -1,7 +1,5 @@
-const CACHE_NAME = 'budget-pwa-v1';
+const CACHE_NAME = 'budget-pwa-v2';
 const OFFLINE_ASSETS = [
-  './',
-  './index.html',
   './manifest.json',
   './icon-512.png',
   'https://cdn.tailwindcss.com',
@@ -28,17 +26,22 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+
+  if (req.mode === 'navigate') {
+    event.respondWith(
+      fetch(req).catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(req).then((hit) => {
       if (hit) return hit;
       return fetch(req).then((res) => {
         const resClone = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone)).catch(()=>{});
+        caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone)).catch(() => {});
         return res;
-      }).catch(() => {
-        if (req.mode === 'navigate') return caches.match('./index.html');
-        return Promise.reject('offline');
-      });
+      }).catch(() => Promise.reject('offline'));
     })
   );
 });
