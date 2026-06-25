@@ -11,7 +11,7 @@
 <p class="text-sm text-gray-600 mb-4">Add recurring items, set a known balance on a date, and see your forecast. Your data stays on your device.</p></div>
 <div id="root"></div>
 <script>if('serviceWorker'in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./service-worker.js').catch(()=>{}));}</script>
-<script type="text/babel">
+<script type="text/babel" data-presets="react">
 const {useEffect,useMemo,useState}=React;
 const pad=n=>(n<10?`0${n}`:`${n}`);const toKey=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
 const parseKey=k=>{const [y,m,d]=k.split("-").map(x=>parseInt(x,10));return new Date(y,m-1,d)};
