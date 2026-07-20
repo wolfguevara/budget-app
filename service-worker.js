@@ -1,11 +1,9 @@
-const CACHE_NAME = 'budget-pwa-v2';
+const CACHE_NAME = 'budget-pwa-v3';
 const OFFLINE_ASSETS = [
+  './',
+  './index.html',
   './manifest.json',
-  './icon-512.png',
-  'https://cdn.tailwindcss.com',
-  'https://unpkg.com/react@18/umd/react.production.min.js',
-  'https://unpkg.com/react-dom@18/umd/react-dom.production.min.js',
-  'https://unpkg.com/@babel/standalone/babel.min.js'
+  './icon.svg'
 ];
 
 self.addEventListener('install', (event) => {
@@ -34,14 +32,21 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  if (new URL(req.url).origin !== self.location.origin) {
+    event.respondWith(fetch(req));
+    return;
+  }
+
   event.respondWith(
     caches.match(req).then((hit) => {
       if (hit) return hit;
       return fetch(req).then((res) => {
-        const resClone = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone)).catch(() => {});
+        if (req.method === 'GET' && res.ok) {
+          const resClone = res.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(req, resClone)).catch(() => {});
+        }
         return res;
-      }).catch(() => Promise.reject('offline'));
+      }).catch(() => caches.match('./index.html'));
     })
   );
 });
